@@ -263,7 +263,7 @@ def iter_transcripts(self, region=None, query=None, min_coverage=None, max_cover
         msg = 'did not find the following filter rules: {}\nvalid rules are: {}'
         assert all(f in all_filter for f in used_tags), msg.format(
             ', '.join(f for f in used_tags if f not in all_filter), ', '.join(all_filter))
-        tr_filter_fun = {tag: _filter_function(self.filter['transcript'][tag])[0] for tag in used_tags if tag in self.filter['transcript']}
+        transcript_filter_fun = {tag: _filter_function(self.filter['transcript'][tag])[0] for tag in used_tags if tag in self.filter['transcript']}
         g_filter_fun = {tag: _filter_function(self.filter['gene'][tag])[0] for tag in used_tags if tag in self.filter['gene']}
 
         try:  # test the filter expression with dummy tags
@@ -272,20 +272,20 @@ def iter_transcripts(self, region=None, query=None, min_coverage=None, max_cover
             logger.error("Error in query string: \n%s", query)
             raise
     else:
-        tr_filter_fun = query_fun = None
+        transcript_filter_fun = query_fun = None
         g_filter_fun = {}
     if genewise:
-        for g in self.iter_genes(region=region, gois=gois, progress_bar=progress_bar):
-            g_filter_eval = {tag: fun(**g.data) for tag, fun in g_filter_fun.items()}
-            filter_result = tuple(_filter_transcripts(g, g.transcripts, query_fun, tr_filter_fun, g_filter_eval, min_coverage, max_coverage))
+        for gene in self.iter_genes(region=region, gois=gois, progress_bar=progress_bar):
+            g_filter_eval = {tag: fun(**gene.data) for tag, fun in g_filter_fun.items()}
+            filter_result = tuple(_filter_transcripts(gene, gene.transcripts, query_fun, transcript_filter_fun, g_filter_eval, min_coverage, max_coverage))
             if filter_result:
-                i_tuple, tr_tuple = zip(*filter_result)
-                yield g, i_tuple, tr_tuple
+                i_tuple, transcript_tuple = zip(*filter_result)
+                yield gene, i_tuple, transcript_tuple
     else:
-        for g in self.iter_genes(region=region, gois=gois, progress_bar=progress_bar):
-            g_filter_eval = {tag: fun(**g.data) for tag, fun in g_filter_fun.items()}
-            for i, tr in _filter_transcripts(g, g.transcripts, query_fun, tr_filter_fun, g_filter_eval, min_coverage, max_coverage):
-                yield g, i, tr
+        for gene in self.iter_genes(region=region, gois=gois, progress_bar=progress_bar):
+            g_filter_eval = {tag: fun(**gene.data) for tag, fun in g_filter_fun.items()}
+            for i, transcript in _filter_transcripts(gene, gene.transcripts, query_fun, transcript_filter_fun, g_filter_eval, min_coverage, max_coverage):
+                yield gene, i, transcript
 
 
 def iter_ref_transcripts(self, region=None, query=None, genewise=False, gois=None, progress_bar=False):
@@ -305,7 +305,7 @@ def iter_ref_transcripts(self, region=None, query=None, genewise=False, gois=Non
         query_fun, used_tags = _filter_function(query)
         msg = 'did not find the following filter rules: {}\nvalid rules are: {}'
         ref_filter_fun = {tag: _filter_function(self.filter['reference'][tag])[0] for tag in used_tags if tag in self.filter['reference']}
-        g_filter_fun = {tag: _filter_function(self.filter['gene'][tag])[0] for tag in used_tags if tag in self.filter['gene']}
+        gene_filter_fun = {tag: _filter_function(self.filter['gene'][tag])[0] for tag in used_tags if tag in self.filter['gene']}
         assert all(f in all_filter for f in used_tags), msg.format(
             ', '.join(f for f in used_tags if f not in all_filter), ', '.join(all_filter))
         try:  # test the filter expression with dummy tags
@@ -315,20 +315,20 @@ def iter_ref_transcripts(self, region=None, query=None, genewise=False, gois=Non
             raise
     else:
         ref_filter_fun = query_fun = None
-        g_filter_fun = {}
+        gene_filter_fun = {}
     if genewise:
-        for g in self.iter_genes(region=region, gois=gois, progress_bar=progress_bar):
-            g_filter_eval = {tag: fun(**g.data) for tag, fun in g_filter_fun.items()}
-            filter_result = tuple(_filter_transcripts(g, g.ref_transcripts, query_fun, ref_filter_fun, g_filter_eval))
+        for gene in self.iter_genes(region=region, gois=gois, progress_bar=progress_bar):
+            gene_filter_eval = {tag: fun(**gene.data) for tag, fun in gene_filter_fun.items()}
+            filter_result = tuple(_filter_transcripts(gene, gene.ref_transcripts, query_fun, ref_filter_fun, gene_filter_eval))
             if filter_result:
-                i_tuple, tr_tuple = zip(*filter_result)
-                yield g, i_tuple, tr_tuple
+                i_tuple, transcript_tuple = zip(*filter_result)
+                yield gene, i_tuple, transcript_tuple
     else:
-        for g in self.iter_genes(region=region, gois=gois, progress_bar=progress_bar):
-            if g.is_annotated:
-                g_filter_eval = {tag: fun(**g.data) for tag, fun in g_filter_fun.items()}
-                for i, tr in _filter_transcripts(g, g.ref_transcripts, query_fun, ref_filter_fun, g_filter_eval):
-                    yield g, i, tr
+        for gene in self.iter_genes(region=region, gois=gois, progress_bar=progress_bar):
+            if gene.is_annotated:
+                gene_filter_eval = {tag: fun(**gene.data) for tag, fun in gene_filter_fun.items()}
+                for i, transcript in _filter_transcripts(gene, gene.ref_transcripts, query_fun, ref_filter_fun, gene_filter_eval):
+                    yield gene, i, transcript
 
 
 def _eval_filter_fun(fun, name, **args):
