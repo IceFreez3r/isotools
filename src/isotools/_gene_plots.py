@@ -463,7 +463,7 @@ def gene_track(self, ax=None, title=None, reference=True, select_transcripts=Non
 
         # use SQANTI color palette if colorbySqanti is True
         if colorbySqanti:
-            color = sqanti_palette[tr['annotation'][0]]['color']
+            color = sqanti_palette[transcript['annotation'][0]]['color']
 
         # line from TSS to PAS at 0.25
         ax.plot((tr_start, tr_end), [i + .25] * 2, color=color)
