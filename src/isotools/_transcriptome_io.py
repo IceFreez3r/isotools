@@ -838,11 +838,20 @@ def _determine_TSS_PAS(gene: Gene | None, transcript: Transcript):
         # Find closest upstream reference TSS from median
         tss = get_quantiles(tss_options, [0.5])[0]
         ref_tsss = [transcript['exons'][0][0] if gene.strand == '+' else transcript['exons'][-1][1] for transcript in gene.ref_transcripts]
+        # Filter for upstream TSS
         ref_tsss = [ref_tss for ref_tss in ref_tsss if ref_tss <= tss] if gene.strand == '+' else [ref_tss for ref_tss in ref_tsss if ref_tss >= tss]
         if ref_tsss:
             old_tss = tss
-            tss = min(ref_tsss, key=lambda x: abs(x - tss))
-            logger.debug(f'Corrected TSS from {old_tss} to {tss}')
+            new_tss = min(ref_tsss, key=lambda x: abs(x - tss))
+            # Find closest upstream reference exon end from median
+            end_index = 1 if gene.strand == '+' else 0
+            ref_exon_ends = [exon[end_index] for exon in transcript["exons"] for transcript in gene.ref_transcripts]
+            # Filter for upstream exon ends that are still before the new TSS
+            ref_exon_ends = [ref_exon_end for ref_exon_end in ref_exon_ends if (ref_exon_end <= tss and ref_exon_end >= new_tss)] if gene.strand == '+' else [ref_exon_end for ref_exon_end in ref_exon_ends if (ref_exon_end >= tss and ref_exon_end <= new_tss)]
+            # Don't extend past exon ends
+            if not ref_exon_ends:
+                logger.debug(f'Corrected TSS from {old_tss} to {new_tss}')
+                tss = new_tss
         # TODO: Limit distance?
     else:
         # Use median TSS
