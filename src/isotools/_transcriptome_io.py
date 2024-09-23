@@ -835,31 +835,17 @@ def _combine_transcripts(established: Transcript, new_transcript: Transcript):
 def _determine_TSS_PAS(gene: Gene | None, transcript: Transcript):
     tss_options = [pos for sample_name in transcript['TSS'] for pos in transcript['TSS'][sample_name].items()]
     pas_options = [pos for sample_name in transcript['PAS'] for pos in transcript['PAS'][sample_name].items()]
-    if gene is not None and gene.is_annotated:
+    if gene is not None and gene.is_annotated and len(transcript['exons']) > 1:
         # Find closest upstream reference TSS from median
         tss = get_quantiles(tss_options, [0.5])[0]
-        ref_tsss = [transcript['exons'][0][0] if gene.strand == '+' else transcript['exons'][-1][1] for transcript in gene.ref_transcripts]
-        # Filter for upstream TSS
-        if gene.strand == '+':
-            ref_tsss = [ref_tss for ref_tss in ref_tsss if ref_tss <= tss]
-        else:
-            ref_tsss = [ref_tss for ref_tss in ref_tsss if ref_tss >= tss]
-        if ref_tsss:
+        matching_ref = [ref for ref in gene.ref_transcripts if splice_identical(ref['exons'], transcript['exons'])]
+        if matching_ref:
+            matching_ref = matching_ref[0]
             old_tss = tss
-            new_tss = min(ref_tsss, key=lambda x: abs(x - tss))
-            # Find closest upstream reference exon end from median
-            end_index = 1 if gene.strand == '+' else 0
-            ref_exon_ends = [exon[end_index] for transcript in gene.ref_transcripts for exon in transcript["exons"]]
-            # Filter for upstream exon ends that are still before the new TSS
-            if gene.strand == '+':
-                ref_exon_ends = [ref_exon_end for ref_exon_end in ref_exon_ends if (ref_exon_end <= tss and ref_exon_end >= new_tss)]
-            else:
-                ref_exon_ends = [ref_exon_end for ref_exon_end in ref_exon_ends if (ref_exon_end >= tss and ref_exon_end <= new_tss)]
-            # Don't extend past exon ends
-            if not ref_exon_ends:
-                logger.debug(f'Corrected TSS from {old_tss} to {new_tss}')
-                tss = new_tss
-        # TODO: Limit distance?
+            ref_tss = matching_ref['exons'][0][0] if gene.strand == '+' else matching_ref['exons'][-1][1]
+            if (gene.strand == '+') == (ref_tss < tss):
+                logger.debug(f'Corrected TSS from {old_tss} to {ref_tss}')
+                tss = ref_tss
     else:
         # Use median TSS
         tss = get_quantiles(tss_options, [0.5])[0]
