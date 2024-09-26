@@ -443,18 +443,7 @@ def add_sample_from_bam(self: Transcriptome, fn, sample_name=None, barcode_file=
                 for transcript_interval in transcript_intervals:
                     transcript = transcript_interval.data
                     transcript_ranges = transcript.pop('range')
-                    starts, ends = {}, {}
-                    for range, cov in transcript_ranges.items():
-                        starts[range[0]] = starts.get(range[0], 0) + cov
-                        ends[range[1]] = ends.get(range[1], 0) + cov
-                    # get the median TSS/PAS
-                    transcript['exons'][0][0] = get_quantiles(starts.items(), [0.5])[0]
-                    transcript['exons'][-1][1] = get_quantiles(ends.items(), [0.5])[0]
-                    cov = sum(transcript_ranges.values())
-                    s_name = transcript.get('bc_group', sample_name)
-                    transcript['coverage'] = {s_name: cov}
-                    transcript['TSS'] = {s_name: starts if transcript['strand'] == '+' else ends}
-                    transcript['PAS'] = {s_name: starts if transcript['strand'] == '-' else ends}
+                    _set_ends_of_transcript(transcript, transcript_ranges, s_name)
 
                     gene = _add_sample_transcript(self, transcript, chrom, fuzzy_junction, min_exonic_ref_coverage, strictness=strictness)
                     if gene is None:
@@ -659,6 +648,28 @@ def _check_chimeric(chimeric):
     return chimeric_dict, non_chimeric
 
 
+def _set_ends_of_transcript(transcript: Transcript, transcript_ranges, sample_name):
+    start, end = float('inf'), 0
+    starts, ends = {}, {}
+    for range, cov in transcript_ranges.items():
+        if range[0] < start:
+            start = range[0]
+        if range[1] > end:
+            end = range[1]
+        starts[range[0]] = starts.get(range[0], 0) + cov
+        ends[range[1]] = ends.get(range[1], 0) + cov
+
+    # This will be changed again, when assigning to a gene
+    transcript['exons'][0][0] = start
+    transcript['exons'][-1][1] = end
+
+    cov = sum(transcript_ranges.values())
+    s_name = transcript.get('bc_group', sample_name)
+    transcript['coverage'] = {s_name: cov}
+    transcript['TSS'] = {s_name: starts if transcript['strand'] == '+' else ends}
+    transcript['PAS'] = {s_name: ends if transcript['strand'] == '+' else starts}
+
+
 def _add_sample_gene(transcriptome: Transcriptome, gene_start, gene_end, gene_infos, transcript_list, chrom, novel_prefix):
     '''add new gene to existing gene in chrom - return gene on success and None if no Gene was found.
     For matching transcripts in gene, transcripts are merged. Coverage, transcript TSS/PAS need to be reset.
@@ -734,6 +745,7 @@ def _add_sample_transcript(transcriptome: Transcriptome, transcript: Transcript,
         transcript['annotation'] = (4, {'intergenic': []})
         return None
     if genes_overlap is None:
+        # At this point the transcript still uses min and max from all reads for start and end
         genes_overlap = transcriptome.data[chrom][transcript['exons'][0][0]: transcript['exons'][-1][1]]
     genes_overlap_strand = [gene for gene in genes_overlap if gene.strand == transcript['strand']]
     # check if transcript is already there (e.g. from other sample, or in case of long intron chimeric alignments also same sample):
@@ -741,6 +753,7 @@ def _add_sample_transcript(transcriptome: Transcriptome, transcript: Transcript,
         for transcript2 in gene.transcripts:
             if splice_identical(transcript2['exons'], transcript['exons'], strictness=strictness):
                 _combine_transcripts(transcript2, transcript)
+                transcript2 = _determine_TSS_PAS(gene, transcript2)
                 return gene
     # we have a new transcript (not seen in this or other samples)
     # check if gene is already there (e.g. from same or other sample):
@@ -754,6 +767,7 @@ def _add_sample_transcript(transcriptome: Transcriptome, transcript: Transcript,
                     if splice_identical(transcript2['exons'], transcript['exons'], strictness=strictness):
                         transcript2.setdefault('fuzzy_junction', []).append(shifts)  # keep the info, mainly for testing/statistics
                         _combine_transcripts(transcript2, transcript)
+                        transcript2 = _determine_TSS_PAS(gene, transcript2)
                         return gene
             transcript['annotation'] = gene.ref_segment_graph.get_alternative_splicing(transcript['exons'], additional)
 
@@ -785,6 +799,7 @@ def _add_sample_transcript(transcriptome: Transcriptome, transcript: Transcript,
     else:
         # new novel gene
         transcript['annotation'] = (4, _get_novel_type(transcript['exons'], genes_overlap, genes_overlap_strand))
+    transcript = _determine_TSS_PAS(gene, transcript)
     return gene
 
 
@@ -815,6 +830,29 @@ def _combine_transcripts(established: Transcript, new_transcript: Transcript):
     except BaseException:
         logger.error('error when merging %s into %s', new_transcript, established)
         raise
+
+
+def _determine_TSS_PAS(gene: Gene | None, transcript: Transcript):
+    tss_options = [pos for sample_name in transcript['TSS'] for pos in transcript['TSS'][sample_name].items()]
+    pas_options = [pos for sample_name in transcript['PAS'] for pos in transcript['PAS'][sample_name].items()]
+    if gene is not None and gene.is_annotated:
+        # Find closest upstream reference TSS from median
+        tss = get_quantiles(tss_options, [0.5])[0]
+        ref_tsss = [transcript['exons'][0][0] if gene.strand == '+' else transcript['exons'][-1][1] for transcript in gene.ref_transcripts]
+        ref_tsss = [ref_tss for ref_tss in ref_tsss if ref_tss <= tss] if gene.strand == '+' else [ref_tss for ref_tss in ref_tsss if ref_tss >= tss]
+        if ref_tsss:
+            old_tss = tss
+            tss = min(ref_tsss, key=lambda x: abs(x - tss))
+            logger.debug(f'Corrected TSS from {old_tss} to {tss}')
+        # TODO: Limit distance?
+    else:
+        # Use median TSS
+        tss = get_quantiles(tss_options, [0.5])[0]
+    # Median PAS for both cases
+    pas = get_quantiles(pas_options, [0.5])[0]
+    transcript['exons'][0][0] = tss if transcript['strand'] == '+' else pas
+    transcript['exons'][-1][1] = pas if transcript['strand'] == '+' else tss
+    return transcript
 
 
 def _get_novel_type(exons, genes_overlap, genes_overlap_strand):
