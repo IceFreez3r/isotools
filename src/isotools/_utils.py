@@ -10,6 +10,7 @@ from scipy.stats import chi2_contingency, fisher_exact
 import math
 from typing import Literal, TypeAlias, TYPE_CHECKING
 from intervaltree import Interval, IntervalTree
+from enum import Enum
 
 
 if TYPE_CHECKING:
@@ -26,6 +27,18 @@ In order:
 - node B id
 - event type
 '''
+
+
+class Novelty(Enum):
+    FSM = 0
+    ISM = 1
+    NIC = 2
+    NNC = 3
+    NOVEL = 4
+
+    def __lt__(self, other):
+        return self.value < other.value
+
 
 # from Kozak et al, NAR, 1987
 kozak = np.array([[23, 35, 23, 19], [26, 35, 21, 18], [25, 35, 22, 18], [23, 26, 33, 18], [19, 39, 23, 19], [23, 37, 20, 20], [
@@ -670,14 +683,14 @@ def count_distinct_exon_chain(ec_list, strict_ec=0, strict_pos=15):
 def str_var_triplet(transcripts, samples, strict_ec=0, strict_pos=15):
     '''
     Quantify the structure variation of transcripts in a gene across specified samples.
-    
+
     :param transcripts: A list of transcript annotations of a gene obtained from isoseq[gene].transcripts.
     :param samples: A list of sample names to specify the samples to be considered..
     :param strict_ec: Distance allowed between each position, except for the first/last, in two exon chains so that they can be considered as identical.
     :param strict_pos: Difference allowed between two positions when considering identical TSS/PAS.
     :return (list): A triplet of numbers in the order of distinct TSS positions, exon chains, and PAS positions.
     '''
-    
+
     _, ec_list = structure_feature_cov(transcripts=transcripts, samples=samples, feature='EC')
     n_ec = count_distinct_exon_chain(ec_list=ec_list, strict_ec=strict_ec, strict_pos=strict_pos)
 

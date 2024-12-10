@@ -3,7 +3,7 @@ import numpy as np
 import logging
 import itertools
 from sortedcontainers import SortedDict  # for SpliceGraph
-from ._utils import pairwise, has_overlap, _interval_dist, ASEType, ASEvent
+from ._utils import pairwise, has_overlap, _interval_dist, ASEType, ASEvent, Novelty
 from .decorators import deprecated, experimental
 from typing import Generator, Literal, Optional, Union
 
@@ -184,39 +184,39 @@ class SegmentGraph():
             # for include_ends we need to find first node of exon
             # j_first is index of first node from the first exon,
             j_first = next((i for i in range(j, 0, -1) if self[i-1].end < self[i].start), 0)
-            transcript = [transcript_id for transcript_id, i in enumerate(self._tss) if (not include_ends or self[i].start <= exons[0][0])
+            transcript_ids = [transcript_id for transcript_id, i in enumerate(self._tss) if (not include_ends or self[i].start <= exons[0][0])
                   and j_first <= i <= j and self._is_same_exon(transcript_id, i, j)]
         else:
             if include_ends:
                 j_first = next((i for i in range(j, 0, -1) if self[i].start <= exons[0][0]), 0)
-                transcript = [transcript_id for transcript_id in self[j].pre if self._is_same_exon(transcript_id, j_first, j)]
+                transcript_ids = [transcript_id for transcript_id in self[j].pre if self._is_same_exon(transcript_id, j_first, j)]
                 if j_first == j:
-                    transcript += [transcript_id for transcript_id, i in enumerate(self._tss) if i == j_first]
+                    transcript_ids += [transcript_id for transcript_id, i in enumerate(self._tss) if i == j_first]
             else:
-                transcript = list(self[j].pre)+[transcript_id for transcript_id, i in enumerate(self._tss) if i == j]
+                transcript_ids = list(self[j].pre)+[transcript_id for transcript_id, i in enumerate(self._tss) if i == j]
         # all junctions must be contained and no additional
-        for i, e in enumerate(exons[:-1]):
-            while j < len(self) and self[j].end < e[1]:  # check exon (no junction allowed)
-                transcript = [transcript_id for transcript_id in transcript if transcript_id in self[j].suc and self[j].end == self[self[j].suc[transcript_id]].start]
+        for i, exon in enumerate(exons[:-1]):
+            while j < len(self) and self[j].end < exon[1]:  # check exon (no junction allowed)
+                transcript_ids = [transcript_id for transcript_id in transcript_ids if transcript_id in self[j].suc and self[j].end == self[self[j].suc[transcript_id]].start]
                 j += 1
-            if self[j].end != e[1]:
+            if self[j].end != exon[1]:
                 return []
             # check junction (must be present)
-            transcript = [transcript_id for transcript_id in transcript if transcript_id in self[j].suc and self[self[j].suc[transcript_id]].start == exons[i+1][0]]
-            if not transcript:
+            transcript_ids = [transcript_id for transcript_id in transcript_ids if transcript_id in self[j].suc and self[self[j].suc[transcript_id]].start == exons[i+1][0]]
+            if not transcript_ids:
                 return []
-            j = self[j].suc[transcript[0]]
+            j = self[j].suc[transcript_ids[0]]
         if include_ends:
             while self[j].end < exons[-1][1]:
-                transcript = [transcript_id for transcript_id in transcript if transcript_id in self[j].suc and self[j].end == self[self[j].suc[transcript_id]].start]
+                transcript_ids = [transcript_id for transcript_id in transcript_ids if transcript_id in self[j].suc and self[j].end == self[self[j].suc[transcript_id]].start]
                 j += 1
         if not complete:
-            return transcript
+            return transcript_ids
         # ensure that all transcripts end (no junctions allowed)
         while j < len(self):  # check last exon (no junction allowed)
-            transcript = [transcript_id for transcript_id in transcript if transcript_id not in self[j].suc or self[j].end == self[self[j].suc[transcript_id]].start]
+            transcript_ids = [transcript_id for transcript_id in transcript_ids if transcript_id not in self[j].suc or self[j].end == self[self[j].suc[transcript_id]].start]
             j += 1
-        return transcript
+        return transcript_ids
 
     def _is_same_exon(self, transcript_number, j1, j2):
         '''Tests if nodes j1 and j2 belong to same exon in transcript transcript_number.'''
@@ -284,14 +284,14 @@ class SegmentGraph():
 
         # a list of tuples with (1) gene names and (2) junction numbers covered by other genes (e.g. readthrough fusion)
         if alternative is not None and len(alternative) > 0:
-            category = 4
+            category = Novelty.NOVEL
             fusion_exons = {int((i + 1) / 2) for j in alternative for i in j[1]}
             altsplice = {'readthrough fusion': alternative}  # other novel events are only found in the primary reference transcript
         else:
             transcript = self.search_transcript(exons)
             if transcript:
-                return 0, {'FSM': transcript}
-            category = 1
+                return Novelty.FSM, {'FSM': transcript}
+            category = Novelty.ISM
             altsplice = {}
             fusion_exons = set()
 
@@ -301,7 +301,7 @@ class SegmentGraph():
         j2 = next((j - 1 for j in range(j1, len(self)) if self[j].start >= exons[0][1]), len(self) - 1)
         # j2: index of last segment starting before exon end (i.e. last overlapping segment)
 
-        # check truncation at begining (e.g. low position)
+        # check truncation at beginning (e.g. low position)
         if (len(exons) > 1 and  # no mono exon
                 not any(j in self._tss for j in range(j1, j2 + 1)) and  # no tss/pas within exon
                 self[j1].start <= exons[0][0]):  # start of first exon is exonic in ref
@@ -310,24 +310,26 @@ class SegmentGraph():
                 end = '5' if is_reverse else '3'
                 altsplice.setdefault(f'{end}\' fragment', []).append([self[j0].start, exons[0][0]])  # at start (lower position)
 
-        for i, ex1 in enumerate(exons):
-            ex2 = None if i + 1 == len(exons) else exons[i + 1]
-            if i not in fusion_exons:  # exon belongs to other gene (read through fusion)
-                # finds intron retention (NIC), novel exons, novel splice sites, novel pas/tss (NNC)
-                exon_altsplice, exon_cat = self._check_exon(j1, j2, i == 0, is_reverse, ex1, ex2)
-                category = max(exon_cat, category)
-                for k, v in exon_altsplice.items():
-                    altsplice.setdefault(k, []).extend(v)
-                # find j2: index of last segment starting befor exon2 end (i.e. last overlapping  segment)
-                if ex2 is not None:
-                    if j2 + 1 < len(self):
-                        j1, j2, junction_altsplice = self._check_junction(j1, j2, ex1, ex2)  # finds exon skipping and novel junction (NIC)
-                        if junction_altsplice and i + 1 not in fusion_exons:
-                            category = max(2, category)
-                            for k, v in junction_altsplice.items():
-                                altsplice.setdefault(k, []).extend(v)
-                    else:
-                        j1 = len(self)
+        for i, exon1 in enumerate(exons):
+            exon2 = None if i + 1 == len(exons) else exons[i + 1]
+            if i in fusion_exons:
+                # exon belongs to other gene (read through fusion)
+                continue
+            # finds intron retention (NIC), novel exons, novel splice sites, novel pas/tss (NNC)
+            exon_altsplice, exon_category = self._check_exon(j1, j2, i == 0, is_reverse, exon1, exon2)
+            category = max(exon_category, category)
+            for k, v in exon_altsplice.items():
+                altsplice.setdefault(k, []).extend(v)
+            # find j2: index of last segment starting before exon2 end (i.e. last overlapping  segment)
+            if exon2 is not None:
+                if j2 + 1 < len(self):
+                    j1, j2, junction_altsplice = self._check_junction(j1, j2, exon1, exon2)  # finds exon skipping and novel junction (NIC)
+                    if junction_altsplice and i + 1 not in fusion_exons:
+                        category = max(Novelty.NIC, category)
+                        for k, v in junction_altsplice.items():
+                            altsplice.setdefault(k, []).extend(v)
+                else:
+                    j1 = len(self)
 
         # check truncation at end (e.g. high position)
         if (len(exons) > 1 and
@@ -345,7 +347,7 @@ class SegmentGraph():
 
         if not altsplice:  # all junctions are contained but not all in one transcript
             altsplice = {'novel combination': []}
-            category = 2
+            category = Novelty.NIC
 
         return category, altsplice
 
@@ -358,7 +360,7 @@ class SegmentGraph():
         logger.debug('exon %s between sg node %s and %s/%s (first=%s,rev=%s,e2=%s)', exon, j1, j2, len(self), is_first, is_reverse, exon2)
         is_last = exon2 is None
         altsplice = {}
-        category = 0
+        category = Novelty.FSM
         if j1 > j2:  # exon is not contained at all -> novel exon (or TSS/PAS if first/last)
             category = 3
             if is_first or is_last:
@@ -368,7 +370,8 @@ class SegmentGraph():
             j2 = j1
         elif (is_first and is_last):  # mono-exon (should not overlap a reference monoexon transcript, this is caught earlier)
             altsplice['mono-exon'] = []
-            category = 1
+            # TODO: Not all mono-exons are ISM
+            category = Novelty.ISM
         else:  # check splice sites
             if self[j1][0] != exon[0]:  # first splice site missmatch
                 if not is_first:
@@ -376,11 +379,11 @@ class SegmentGraph():
                     kind = '5' if is_reverse else '3'
                     dist = min((self[j][0] - exon[0] for j in range(j1, j2 + 1)), key=abs)  # the distance to next junction
                     altsplice[f"novel {kind}' splice site"] = [(exon[0], dist)]
-                    category = 3
+                    category = Novelty.NNC
                 elif self[j1][0] > exon[0] and not any(j in self._tss for j in range(j1, j2 + 1)):  # exon start is intronic in ref
                     site = 'PAS' if is_reverse else 'TSS'
                     altsplice.setdefault(f'novel exonic {site}', []).append((exon[0], self[j1][0]))
-                    category = max(1, category)
+                    category = max(Novelty.ISM, category)
             if self[j2][1] != exon[1]:  # second splice site missmatch
                 if not is_last:
                     # pos="intronic" if self[j2][1]<e[1] else "exonic"
@@ -388,11 +391,11 @@ class SegmentGraph():
                     kind = '3' if is_reverse else '5'
                     dist = min((self[j][1] - exon[1] for j in range(j1, j2 + 1)), key=abs)  # the distance to next junction
                     altsplice.setdefault(f"novel {kind}' splice site", []).append((exon[1], dist))
-                    category = 3
+                    category = Novelty.NNC
                 elif self[j2][1] < exon[1] and not any(j in self._pas for j in range(j1, j2 + 1)):  # exon end is intronic in ref & not overlapping pas
                     site = 'TSS' if is_reverse else 'PAS'
                     altsplice.setdefault(f'novel exonic {site}', []).append((self[j2][1], exon[1]))
-                    category = max(1, category)
+                    category = max(Novelty.ISM, category)
 
         # find intron retentions
         if j1 < j2 and any(self[ji + 1].start - self[ji].end > 0 for ji in range(j1, j2)):
@@ -411,7 +414,7 @@ class SegmentGraph():
                         j = nextj
                     if ret_introns:
                         altsplice['intron retention'] = ret_introns
-                        category = max(2, category)
+                        category = max(Novelty.NIC, category)
         logger.debug('check exon %s resulted in %s', exon, altsplice)
         return altsplice, category
 

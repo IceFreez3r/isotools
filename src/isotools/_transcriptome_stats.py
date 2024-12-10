@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 # from .decorators import deprecated, debug, experimental
 from .splice_graph import SegmentGraph
 from ._utils import _filter_function, ASEType, str_var_triplet
+from ._utils import Novelty
 
 logger = logging.getLogger('isotools')
 
@@ -439,7 +440,7 @@ def _check_customised_groups(transcriptome: 'Transcriptome', samples=None, group
 
     if sample_idx:
         group_dict = {gn:[transcriptome.samples.index(s) for s in sample_names] for gn, sample_names in group_dict.items()}
-    
+
     return group_dict
 
 
@@ -472,9 +473,9 @@ def entropy_calculation(self: 'Transcriptome', samples=None, groups=None, min_to
                 if relative:
                     group_entropy = (group_entropy / math.log2(transcript_number)) if transcript_number > 1 else np.nan
                 gene_entropy += [transcript_number, group_entropy]
-        
+
         entropy_tab = pd.concat([entropy_tab, pd.DataFrame([gene_entropy], columns=entropy_tab.columns)], ignore_index=True)
-    
+
     # exclude rows with all empty or NA entries in entropy columns
     entropy_tab.dropna(subset=entropy_tab.columns[2:], how='all', inplace=True)
 
@@ -485,7 +486,7 @@ def str_var_calculation(self: 'Transcriptome', samples=None, groups=None, strict
     '''
     Quantify the structural variation of genes based on selected transcripts.
     Structural variation includes (and in the same order of) distinct TSS positions, exon chains, and PAS positions.
-    
+
     :param samples: A list of sample names to specify the samples to be considered. If omitted, all samples are selected.
     :param groups: Quantification done by groups of samples. A dict {group_name:[sample_name_list]} or a list of group names. If omitted, all the samples are considered as one group.
     :param strict_ec: Distance allowed between each position, except for the first/last, in two exon chains so that they can be considered as identical.
@@ -512,7 +513,7 @@ def str_var_calculation(self: 'Transcriptome', samples=None, groups=None, strict
                 # normalize to the sum of 1
                 group_var = [n / sum(ratio_triplet) for n in ratio_triplet] if sum(ratio_triplet) > 0 else [0, 0, 0]
             gene_str_var += group_var
-        
+
         str_var_tab = pd.concat([str_var_tab, pd.DataFrame([gene_str_var], columns=str_var_tab.columns)], ignore_index=True)
 
     # replace 0 with nan, and remove rows with all nan
@@ -805,7 +806,7 @@ def direct_repeat_hist(self, groups=None, bins=10, x_range=(0, 10), weight_by_co
     # TODO: actually no need to check annotation, could simply use filter flags (or the definition from the filter flags, which should be faster)
     rl = {cat: [] for cat in ('known', 'novel canonical', 'novel noncanonical')}
     for gene, transcript_id, transcript in self.iter_transcripts(**tr_filter):
-        if 'annotation' in transcript and transcript['annotation'][0] == 0:  # e.g. FSM
+        if 'annotation' in transcript and transcript['annotation'][0] == Novelty.FSM:  # e.g. FSM
             rl['known'].extend((drl, gene.coverage[:, transcript_id]) for drl in transcript['direct_repeat_len'])
         elif gene.is_annotated and 'novel_splice_sites' in transcript:
             novel_junction = [i // 2 for i in transcript['novel_splice_sites'] if i % 2 == 0 and i + 1 in transcript['novel_splice_sites']]

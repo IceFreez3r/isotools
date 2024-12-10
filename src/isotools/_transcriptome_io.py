@@ -12,7 +12,7 @@ from contextlib import ExitStack
 from .short_read import Coverage
 from typing import Tuple, TYPE_CHECKING
 from ._utils import junctions_from_cigar, splice_identical, is_same_gene, has_overlap, get_overlap, pairwise, \
-    cigar_string2tuples, rc, get_intersects, _find_splice_sites, _get_overlap, get_quantiles  # , _get_exonic_region
+    cigar_string2tuples, rc, get_intersects, _find_splice_sites, _get_overlap, get_quantiles, Novelty  # , _get_exonic_region
 from .gene import Gene, Transcript
 from .decorators import experimental
 import logging
@@ -676,7 +676,7 @@ def _add_sample_gene(transcriptome: Transcriptome, gene_start, gene_end, gene_in
     Otherwise, a new transcripts are added. In this case, splice graph and coverage have to be reset.'''
     if chrom not in transcriptome.data:
         for transcript in transcript_list:
-            transcript['annotation'] = (4, {'intergenic': []})
+            transcript['annotation'] = (Novelty.NOVEL, {'intergenic': []})
         return transcriptome._add_novel_gene(chrom, gene_start, gene_end, gene_infos['strand'], {'transcripts': transcript_list}, novel_prefix)
 
     # try matching the gene by id
@@ -712,7 +712,7 @@ def _add_sample_gene(transcriptome: Transcriptome, gene_start, gene_end, gene_in
         else:
             genes_overlap_anti = [gene for gene in transcriptome.data[chrom][gene_start: gene_end] if gene.strand != gene_infos['strand']]
             for transcript in transcript_list:
-                transcript['annotation'] = (4, _get_novel_type(transcript['exons'], genes_overlap_anti, genes_overlap_strand))
+                transcript['annotation'] = (Novelty.NOVEL, _get_novel_type(transcript['exons'], genes_overlap_anti, genes_overlap_strand))
             return transcriptome._add_novel_gene(chrom, gene_start, gene_end, gene_infos['strand'], {'transcripts': transcript_list}, novel_prefix)
 
     for transcript in transcript_list:
@@ -731,7 +731,7 @@ def _add_sample_gene(transcriptome: Transcriptome, gene_start, gene_end, gene_in
             else:
                 genes_overlap_strand = [gene for gene in transcriptome.data[chrom][gene_start: gene_end] if gene.strand == gene_infos['strand'] and gene.is_annotated]
                 genes_overlap_anti = [gene for gene in transcriptome.data[chrom][gene_start: gene_end] if gene.strand != gene_infos['strand'] and gene.is_annotated]
-                transcript['annotation'] = (4, _get_novel_type(transcript['exons'], genes_overlap_anti, genes_overlap_strand))  # actually may overlap other genes...
+                transcript['annotation'] = (Novelty.NOVEL, _get_novel_type(transcript['exons'], genes_overlap_anti, genes_overlap_strand))  # actually may overlap other genes...
             best_gene.data.setdefault('transcripts', []).append(transcript)
     return best_gene
 
@@ -742,7 +742,7 @@ def _add_sample_transcript(transcriptome: Transcriptome, transcript: Transcript,
     Otherwise, a new transcript is added. In this case, splice graph and coverage have to be reset.'''
 
     if chrom not in transcriptome.data:
-        transcript['annotation'] = (4, {'intergenic': []})
+        transcript['annotation'] = (Novelty.NOVEL, {'intergenic': []})
         return None
     if genes_overlap is None:
         # At this point the transcript still uses min and max from all reads for start and end
@@ -778,14 +778,14 @@ def _add_sample_transcript(transcriptome: Transcriptome, transcript: Transcript,
         else:
             # add to existing novel (e.g. not in reference) gene
             start, end = min(transcript['exons'][0][0], gene.start), max(transcript['exons'][-1][1], gene.end)
-            transcript['annotation'] = (4, _get_novel_type(transcript['exons'], genes_overlap, genes_overlap_strand))
+            transcript['annotation'] = (Novelty.NOVEL, _get_novel_type(transcript['exons'], genes_overlap, genes_overlap_strand))
             if start < gene.start or end > gene.end:  # range of the novel gene might have changed
                 new_gene = Gene(start, end, gene.data, transcriptome)
                 transcriptome.data[chrom].add(new_gene)  # todo: potential issue: in this case two genes may have grown together
                 transcriptome.data[chrom].remove(gene)
                 gene = new_gene
         # if additional:
-        #    transcript['annotation']=(4,transcript['annotation'][1]) #fusion transcripts... todo: overrule transcript['annotation']
+        #    transcript['annotation']=(Novelty.NOVEL,transcript['annotation'][1]) #fusion transcripts... todo: overrule transcript['annotation']
         # this transcript is seen for the first time. Asign sample specific attributes to sample name
         # for what in 'coverage', 'TSS', 'PAS':
         #    transcript[what] = {sample_name: transcript[what]}
@@ -796,7 +796,7 @@ def _add_sample_transcript(transcriptome: Transcriptome, transcript: Transcript,
         gene.data['coverage'] = None
     else:
         # new novel gene
-        transcript['annotation'] = (4, _get_novel_type(transcript['exons'], genes_overlap, genes_overlap_strand))
+        transcript['annotation'] = (Novelty.NOVEL, _get_novel_type(transcript['exons'], genes_overlap, genes_overlap_strand))
     return gene
 
 
@@ -1350,7 +1350,7 @@ def transcript_table(self: Transcriptome, samples=None, groups=None, coverage=Fa
     :param tpm: If set, expression information (in tpm) is added for specified samples / groups.
     :param tpm_pseudocount: This value is added to the coverage for each transcript, before calculating tpm.
     :param extra_columns: Specify the additional information added to the table.
-        These can be any transcrit property as defined by the key in the transcript dict.
+        These can be any transcript property as defined by the key in the transcript dict.
     :param filter_args: Parameters (e.g. "region", "query", "min_coverage",...) are passed to Transcriptome.iter_transcripts.'''
 
     if samples is None:
@@ -1397,7 +1397,7 @@ def transcript_table(self: Transcriptome, samples=None, groups=None, coverage=Fa
             # subcat_string = ';'.join(k if v is None else '{}:{}'.format(k, v) for k, v in subcat.items())
             e_starts, e_ends = (','.join(str(exons[i][j]) for i in range(len(exons))) for j in range(2))
             row = [gene.chrom, exons[0][0], exons[-1][1], gene.strand, gene.id, gene.name, transcript_id, trlen, len(exons), e_starts, e_ends,
-                   SPLICE_CATEGORY[nov_class], ','.join(subcat)]
+                   nov_class.name, ','.join(subcat)]
             for k in extra_columns:
                 val = transcript.get(k, 'NA')
                 row.append(str(val) if isinstance(val, Iterable) else val)
@@ -1502,7 +1502,7 @@ def write_gtf(self: Transcriptome, fn, source='isotools', gzip=False, **filter_a
 def write_fasta(self: Transcriptome, genome_fn, fn, gzip=False, reference=False, protein=False, **filter_args):
     '''
     Exports the transcript sequences in fasta format to a file.
-    
+
     :param genome_fn: Path to the genome in fastA format.
     :param reference: Specify whether the sequence is fetched for reference transcripts (True), or long read transcripts (False, default).
     :param protein: Return protein sequences (ORF) instead of transcript sequences.

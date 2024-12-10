@@ -13,9 +13,8 @@ import itertools
 from cpmodule import fickett, FrameKmer  # this is from the CPAT module
 from .splice_graph import SegmentGraph
 from .short_read import Coverage
-from ._transcriptome_filter import SPLICE_CATEGORY
 from ._utils import pairwise, _filter_event, find_orfs, DEFAULT_KOZAK_PWM, kozak_score, smooth, get_quantiles, \
-    _filter_function, pairwise_event_test, prepare_contingency_table, cmp_dist
+    _filter_function, pairwise_event_test, prepare_contingency_table, cmp_dist, Novelty
 from typing import Any, Literal, Optional, TypedDict, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -48,7 +47,7 @@ class Transcript(TypedDict, total=False):
     PAS: dict[str, dict[int, int]]
     'The PAS of each sample with their coverage.'
     clipping: dict[str, dict[str, int]]
-    annotation: tuple[int, dict[str, Any]] # TODO: Switch the dict to a TypedDict, Replace novelty with Enum
+    annotation: tuple[Novelty, dict[str, Any]] # TODO: Switch the dict to a TypedDict
     "The annotation of the transcript. The first element is the novelty class (0=FSM,1=ISM,2=NIC,3=NNC,4=Novel gene), the second a dictionary with the subcategories."
     reads: list[str]
     'TODO: This seems to be inconsistent. Sometimes it is a list of read names, sometimes a dict with sample names as keys and the lists as values.'
@@ -163,7 +162,7 @@ class Gene(Interval):
             transcript_info = info.copy()
             if 'downstream_A_content' in transcript:
                 transcript_info['downstream_A_content'] = f'{transcript["downstream_A_content"]:0.3f}'
-            if transcript['annotation'][0] == 0:  # FSM
+            if transcript['annotation'][0] == Novelty.FSM:
                 refinfo = {}
                 for refid in transcript['annotation'][1]['FSM']:
                     ref_fsm.append(refid)
@@ -555,7 +554,7 @@ class Gene(Interval):
                 return ('NA',) * 2
             nov_class, subcat = self.transcripts[transcript_id]['annotation']
             # subcat_string = ';'.join(k if v is None else '{}:{}'.format(k, v) for k, v in subcat.items())
-            return SPLICE_CATEGORY[nov_class], ','.join(subcat)  # only the names of the subcategories
+            return nov_class.name, ','.join(subcat)  # only the names of the subcategories
         elif key == 'coverage':
             return self.coverage[sample_i, transcript_id]
         elif key == 'tpm':

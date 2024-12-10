@@ -1,7 +1,7 @@
 import pytest
 from pysam import FastaFile
 from isotools.transcriptome import Transcriptome
-from isotools._utils import splice_identical
+from isotools._utils import splice_identical, Novelty
 import logging
 logger = logging.getLogger('isotools')
 logger.setLevel(logging.INFO)
@@ -32,7 +32,7 @@ def test_fsm():
     isoseq = Transcriptome.load('tests/data/example_1_isotools.pkl')
     count = 0
     for gene, _, transcript in isoseq.iter_transcripts(query='FSM'):
-        assert transcript['annotation'][0] == 0
+        assert transcript['annotation'][0] == Novelty.FSM, 'expected FSM transcript'
         count += 1
         for ref_id in transcript['annotation'][1]['FSM']:
             assert splice_identical(transcript['exons'], gene.ref_transcripts[ref_id]['exons'])
