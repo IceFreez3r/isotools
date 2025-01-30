@@ -37,6 +37,11 @@ class SQANTI_classification(TypedDict):
     polyA_motif_found: bool
     ratio_TSS: float
 
+TranscriptAnnotation = TypedDict(
+    'TranscriptAnnotation', {
+        'mono-exon': list
+    })
+
 class Transcript(TypedDict, total=False):
     chr: str
     strand: Literal['+', '-']
@@ -48,7 +53,7 @@ class Transcript(TypedDict, total=False):
     PAS: dict[str, dict[int, int]]
     'The PAS of each sample with their coverage.'
     clipping: dict[str, dict[str, int]]
-    annotation: tuple[int, dict[str, Any]] # TODO: Switch the dict to a TypedDict, Replace novelty with Enum
+    annotation: tuple[int, TranscriptAnnotation]
     "The annotation of the transcript. The first element is the novelty class (0=FSM,1=ISM,2=NIC,3=NNC,4=Novel gene), the second a dictionary with the subcategories."
     reads: dict[str, list[str]]
     'sample names as keys, list of reads as values.'

@@ -296,19 +296,22 @@ class SegmentGraph():
             fusion_exons = set()
 
         is_reverse = self.strand == '-'
+        # index of first segment ending after exon start (i.e. first overlapping segment)
         j1 = next((j for j, n in enumerate(self) if n.end > exons[0][0]))
-        # j1: index of first segment ending after exon start (i.e. first overlapping segment)
+        # index of last segment starting before exon end (i.e. last overlapping segment)
         j2 = next((j - 1 for j in range(j1, len(self)) if self[j].start >= exons[0][1]), len(self) - 1)
-        # j2: index of last segment starting before exon end (i.e. last overlapping segment)
 
         # check truncation at begining (e.g. low position)
         if (len(exons) > 1 and  # no mono exon
                 not any(j in self._tss for j in range(j1, j2 + 1)) and  # no tss/pas within exon
                 self[j1].start <= exons[0][0]):  # start of first exon is exonic in ref
-            j0 = max(self._tss[transcript_id] for transcript_id in self[j1].pre)  # j0 is the closest start node
-            if any(self[j].end < self[j + 1].start for j in range(j0, j1)):  # assure there is an intron between closest tss/pas and exon
+            # closest start node
+            j0 = max(self._tss[transcript_id] for transcript_id in self[j1].pre)
+            # assure there is an intron between closest tss/pas and exon
+            if any(self[j].end < self[j + 1].start for j in range(j0, j1)):
                 end = '5' if is_reverse else '3'
-                altsplice.setdefault(f'{end}\' fragment', []).append([self[j0].start, exons[0][0]])  # at start (lower position)
+                # add start (lower position)
+                altsplice.setdefault(f'{end}\' fragment', []).append([self[j0].start, exons[0][0]])
 
         for i, ex1 in enumerate(exons):
             ex2 = None if i + 1 == len(exons) else exons[i + 1]
@@ -335,11 +338,13 @@ class SegmentGraph():
                 not any(j in self._pas for j in range(j1, j2 + 1)) and  # no tss/pas within exon
                 self[j2].end >= exons[-1][1]):  # end of last exon is exonic in ref
             try:
-                j3 = min(self._pas[transcript_id] for transcript_id in self[j2].suc)  # j3 is the next end node (pas/tss on fwd/rev)
+                # next end node (pas/tss on fwd/rev)
+                j3 = min(self._pas[transcript_id] for transcript_id in self[j2].suc)
             except ValueError:
                 logger.error('\n'.join([str(exons), str(self._pas), str((j1, j2)), str([(j, n) for j, n in enumerate(self)])]))
                 raise
-            if any(self[j].end < self[j + 1].start for j in range(j2, j3)):  # assure there is an intron between closest tss/pas and exon
+            # assure there is an intron between closest tss/pas and exon
+            if any(self[j].end < self[j + 1].start for j in range(j2, j3)):
                 end = '3' if is_reverse else '5'
                 altsplice.setdefault(f'{end}\' fragment', []).append([exons[-1][1], self[j3].end])
 
